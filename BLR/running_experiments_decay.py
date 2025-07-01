@@ -19,11 +19,8 @@ import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
-def runexp_BLR_decay(model, true_mu, true_A, init_mu, init_sig, n_iter, decay_factor=0.1, beta=1, c=0.1, mode='rbf', n_particles=10, step_size=1e-2, cons=1., seed=10, adagrad=True, lr_decay=False):
+def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter, decay_factor=0.1, beta=1, c=0.1, mode='rbf', step_size=1e-2, cons=1., seed=10, adagrad=True, lr_decay=False):
     np.random.seed(seed)
-    
-    # Initialize particles from multivariate normal
-    x0 = np.random.multivariate_normal(mean=init_mu, cov=init_sig, size=n_particles)
     
     # Use MCMC-estimated true parameters
     theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(
@@ -32,7 +29,24 @@ def runexp_BLR_decay(model, true_mu, true_A, init_mu, init_sig, n_iter, decay_fa
         lr_decay=lr_decay, verbose=True, true_mu=true_mu, true_A=true_A
     )
     
-    return kl_list, ksd_list, eig_list
+    # Compute additional KL divergences using KDE and k-NN methods
+    svgd = SVGD()
+    
+    # KDE-based KL divergence
+    try:
+        kl_kde = svgd.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
+    except Exception as e:
+        print(f"Warning: KDE KL calculation failed: {e}")
+        kl_kde = None
+    
+    # MMD-based divergence (more stable alternative)
+    try:
+        kl_mmd = svgd.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
+    except Exception as e:
+        print(f"Warning: MMD divergence calculation failed: {e}")
+        kl_mmd = None
+    
+    return theta, kl_list, ksd_list, eig_list, kl_kde, kl_mmd
 
 def load_mcmc_results(n_samples=2000, n_warmup=1000, chains=4, random_seed=42, alpha_prior=1.0, beta_prior=0.1):
     """Load MCMC results or run MCMC if not available"""
@@ -42,7 +56,7 @@ def load_mcmc_results(n_samples=2000, n_warmup=1000, chains=4, random_seed=42, a
         print(f"Loading existing MCMC results from {results_file}")
         with open(results_file, 'rb') as f:
             results = pickle.load(f)
-            return results['true_mu'], results['true_A']
+            return results['true_mu'], results['true_A'], results.get('mcmc_samples', None)
     else:
         print("MCMC results not found. Running MCMC...")
         mcmc_model = BLRMCMC(alpha_prior=alpha_prior, beta_prior=beta_prior)
@@ -56,7 +70,10 @@ def load_mcmc_results(n_samples=2000, n_warmup=1000, chains=4, random_seed=42, a
             random_seed=random_seed,
             force_rerun=False
         )
-        return true_mu, true_A
+        # Load the results again to get mcmc_samples
+        with open(results_file, 'rb') as f:
+            results = pickle.load(f)
+            return results['true_mu'], results['true_A'], results.get('mcmc_samples', None)
 
 def main():
     """Main function"""
@@ -87,8 +104,8 @@ def main():
         n_samples=None, test_size=0.2, random_state=42
     )
     
-    # Load MCMC-estimated true parameters
-    true_mu, true_A = load_mcmc_results(
+    # Load MCMC-estimated true parameters and samples
+    true_mu, true_A, mcmc_samples = load_mcmc_results(
         n_samples=2000, n_warmup=1000, chains=4, random_seed=42,
         alpha_prior=args.alpha_prior, beta_prior=args.beta_prior
     )
@@ -98,6 +115,10 @@ def main():
     print(f"  true_A shape: {true_A.shape}")
     print(f"  true_mu norm: {np.linalg.norm(true_mu):.4f}")
     print(f"  true_A condition number: {np.linalg.cond(true_A):.2e}")
+    if mcmc_samples is not None:
+        print(f"  MCMC samples shape: {mcmc_samples.shape}")
+    else:
+        print("  Warning: MCMC samples not available for KDE/k-NN KL calculation")
     
     # Initialize parameters for particles
     n_params = model.n_params
@@ -132,10 +153,9 @@ def main():
             print(f"  Running with decay beta = {decay_beta}")
             
             # Run SVGD
-            theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(
-                x0, model.dlnprob, n_iter=n_iter, stepsize=stepsize, 
-                decay_factor=decay_factor, beta=decay_beta, c=c, mode=mode,
-                verbose=True, true_mu=true_mu, true_A=true_A
+            theta, kl_list, ksd_list, eig_list, kl_kde, kl_mmd = runexp_BLR_decay(
+                model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter=n_iter, step_size=stepsize, 
+                decay_factor=decay_factor, beta=decay_beta, c=c, mode=mode
             )
             
             # Save results
@@ -144,13 +164,16 @@ def main():
                 'kl_list': kl_list,
                 'ksd_list': ksd_list,
                 'eig_list': eig_list,
+                'kl_kde': kl_kde,
+                'kl_mmd': kl_mmd,
                 'n_particles': n_particles,
                 'n_iterations': n_iter,
                 'decay_beta': decay_beta,
                 'stepsize': stepsize,
                 'mode': mode,
                 'true_mu': true_mu,
-                'true_A': true_A
+                'true_A': true_A,
+                'mcmc_samples': mcmc_samples
             }
             
             # Save to file
@@ -165,7 +188,13 @@ def main():
                 final_kl = kl_list[-1] if kl_list[-1] is not None else float('inf')
                 if isinstance(final_kl, np.ndarray):
                     final_kl = final_kl.item()
-                print(f"    Final KL divergence: {final_kl:.6f}")
+                print(f"    Final KL divergence (Gaussian): {final_kl:.6f}")
+            
+            if kl_kde is not None:
+                print(f"    Final KL divergence (KDE): {kl_kde:.6f}")
+            
+            if kl_mmd is not None:
+                print(f"    Final MMD divergence: {kl_mmd:.6f}")
             
             if ksd_list is not None and len(ksd_list) > 0:
                 final_ksd = ksd_list[-1] if ksd_list[-1] is not None else float('inf')

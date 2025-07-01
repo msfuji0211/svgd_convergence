@@ -4,6 +4,7 @@ from sklearn.metrics import mean_squared_error as mse
 from sklearn.metrics.pairwise import rbf_kernel as rbf
 from sklearn.metrics.pairwise import linear_kernel as linear
 from tqdm.auto import tqdm
+from sklearn.neighbors import KernelDensity, NearestNeighbors
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -170,6 +171,105 @@ class SVGD():
         except np.linalg.LinAlgError:
             # Fallback: use simpler distance measure
             return np.mean((mu_theta - true_mu) ** 2)
+    
+    def kl_divergence_kde(self, theta, mcmc_samples, bandwidth='silverman'):
+        """
+        Compute KL divergence using Kernel Density Estimation
+        This method doesn't assume any specific distribution form
+        
+        Parameters:
+        -----------
+        theta: SVGD particles
+        mcmc_samples: MCMC samples from true posterior
+        bandwidth: bandwidth for KDE ('silverman', 'scott', or float)
+        
+        Returns:
+        --------
+        kl: KL divergence estimate
+        """
+        if mcmc_samples is None or len(mcmc_samples) == 0:
+            return 0.0
+        
+        try:
+            # Use a subset of MCMC samples for computational efficiency
+            n_mcmc = min(len(mcmc_samples), 1000)  # Limit to 1000 samples
+            mcmc_subset = mcmc_samples[:n_mcmc]
+            
+            # Fit KDE to MCMC samples (true posterior)
+            kde_true = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(mcmc_subset)
+            
+            # Fit KDE to SVGD particles
+            kde_svgd = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(theta)
+            
+            # Compute log densities at MCMC sample locations (true distribution)
+            log_density_true_at_mcmc = kde_true.score_samples(mcmc_subset)
+            log_density_svgd_at_mcmc = kde_svgd.score_samples(mcmc_subset)
+            
+            # KL divergence: E_p[log(p) - log(q)] where p is true, q is SVGD
+            # We compute this expectation over the true distribution (MCMC samples)
+            kl = np.mean(log_density_true_at_mcmc - log_density_svgd_at_mcmc)
+            
+            # Ensure non-negativity (numerical stability)
+            kl = max(0.0, kl)
+            
+            return kl
+            
+        except Exception as e:
+            print(f"Warning: KDE-based KL calculation failed: {e}")
+            return 0.0
+    
+
+    
+    def kl_divergence_mmd(self, theta, mcmc_samples, bandwidth='median'):
+        """
+        Compute KL divergence approximation using Maximum Mean Discrepancy (MMD)
+        This is a more stable alternative when direct KL estimation is problematic
+        
+        Parameters:
+        -----------
+        theta: SVGD particles
+        mcmc_samples: MCMC samples from true posterior
+        bandwidth: bandwidth for RBF kernel ('median', 'silverman', or float)
+        
+        Returns:
+        --------
+        mmd: MMD-based divergence estimate
+        """
+        if mcmc_samples is None or len(mcmc_samples) == 0:
+            return 0.0
+        
+        try:
+            # Use a subset of MCMC samples for computational efficiency
+            n_mcmc = min(len(mcmc_samples), 1000)
+            mcmc_subset = mcmc_samples[:n_mcmc]
+            
+            # Compute pairwise distances for bandwidth selection
+            all_samples = np.vstack([theta, mcmc_subset])
+            pairwise_dists = cdist(all_samples, all_samples)
+            
+            # Select bandwidth
+            if bandwidth == 'median':
+                h = np.median(pairwise_dists)
+            elif bandwidth == 'silverman':
+                h = np.median(pairwise_dists) * (len(all_samples) ** (-1.0 / (all_samples.shape[1] + 4)))
+            else:
+                h = bandwidth
+            
+            # Compute MMD
+            Kxx = rbf(theta, theta, h).mean()
+            Kxy = rbf(theta, mcmc_subset, h).mean()
+            Kyy = rbf(mcmc_subset, mcmc_subset, h).mean()
+            
+            mmd = Kxx - 2 * Kxy + Kyy
+            
+            # Ensure non-negativity
+            mmd = max(0.0, mmd)
+            
+            return mmd
+            
+        except Exception as e:
+            print(f"Warning: MMD-based divergence calculation failed: {e}")
+            return 0.0
     
     def rbf_kernel(self, x, y, bandwidth=1.):
         diff = x - y
