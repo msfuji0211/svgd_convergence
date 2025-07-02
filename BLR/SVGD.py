@@ -57,7 +57,7 @@ class SVGD():
         
         return (Kxy, dxkxy)
  
-    def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, c=0.1, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None):
+    def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, c=0.1, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None, mcmc_samples=None):
         # Check input
         if x0 is None or lnprob is None:
             raise ValueError('x0 or lnprob cannot be None!')
@@ -67,6 +67,8 @@ class SVGD():
             mse_list = np.zeros([n_iter,1])
             kl_list = np.zeros([n_iter,1])
             ksd_list = np.zeros([n_iter,1])
+            kl_kde_list = np.zeros([n_iter,1])  # Add KDE-KL tracking
+            kl_mmd_list = np.zeros([n_iter,1])  # Add MMD tracking
             fisher_list = np.zeros([n_iter,1])
             eig_list = np.zeros([3, n_particle], dtype=complex)
             pos_sample = np.random.multivariate_normal(mean=true_mu, cov=true_A, size=1000)
@@ -121,6 +123,28 @@ class SVGD():
             if verbose == True:
                 kl_list[iter] = self.kl_divergence(theta, true_mu, true_A)
                 ksd_list[iter] = self.ksd_distance(theta, lnprob, mode)
+                
+                # Calculate KDE-KL and MMD every 100 iterations to save computation time
+                if iter % 100 == 0 or iter == n_iter - 1:
+                    try:
+                        kl_kde_list[iter] = self.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
+                    except Exception as e:
+                        if iter == 0:  # Only print warning once
+                            print(f"Warning: KDE KL calculation failed: {e}")
+                        kl_kde_list[iter] = np.nan
+                    
+                    try:
+                        kl_mmd_list[iter] = self.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
+                    except Exception as e:
+                        if iter == 0:  # Only print warning once
+                            print(f"Warning: MMD calculation failed: {e}")
+                        kl_mmd_list[iter] = np.nan
+                else:
+                    # Interpolate between calculated values
+                    if iter > 0:
+                        kl_kde_list[iter] = kl_kde_list[iter-1]
+                        kl_mmd_list[iter] = kl_mmd_list[iter-1]
+                
                 if iter+1 == 1 or (iter+1) == (n_iter/2) or (iter+1) / n_iter == 1:
                     # Add numerical stability for eigenvalue computation
                     try:
@@ -130,7 +154,7 @@ class SVGD():
                         eig_list[c] = np.zeros(kxy.shape[0], dtype=complex)
                     c += 1
         
-        return theta, mse_list, kl_list, ksd_list, fisher_list, np.sort(eig_list,axis=1)[:,::-1]
+        return theta, mse_list, kl_list, ksd_list, fisher_list, np.sort(eig_list,axis=1)[:,::-1], kl_kde_list, kl_mmd_list
     
     def MSE(self, theta, true_param):
         avg_theta = np.mean(theta, 0)

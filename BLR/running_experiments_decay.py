@@ -23,30 +23,17 @@ def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter,
     np.random.seed(seed)
     
     # Use MCMC-estimated true parameters
-    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(
+    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list, kl_kde_list, kl_mmd_list = SVGD().update(
         x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, 
         decay_factor=decay_factor, beta=beta, c=c, mode=mode, adagrad=adagrad, 
-        lr_decay=lr_decay, verbose=True, true_mu=true_mu, true_A=true_A
+        lr_decay=lr_decay, verbose=True, true_mu=true_mu, true_A=true_A, mcmc_samples=mcmc_samples
     )
     
-    # Compute additional KL divergences using KDE and k-NN methods
-    svgd = SVGD()
+    # Get final values for backward compatibility
+    kl_kde = kl_kde_list[-1] if not np.isnan(kl_kde_list[-1]) else None
+    kl_mmd = kl_mmd_list[-1] if not np.isnan(kl_mmd_list[-1]) else None
     
-    # KDE-based KL divergence
-    try:
-        kl_kde = svgd.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
-    except Exception as e:
-        print(f"Warning: KDE KL calculation failed: {e}")
-        kl_kde = None
-    
-    # MMD-based divergence (more stable alternative)
-    try:
-        kl_mmd = svgd.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
-    except Exception as e:
-        print(f"Warning: MMD divergence calculation failed: {e}")
-        kl_mmd = None
-    
-    return theta, kl_list, ksd_list, eig_list, kl_kde, kl_mmd
+    return theta, kl_list, ksd_list, eig_list, kl_kde_list, kl_mmd_list, kl_kde, kl_mmd
 
 def load_mcmc_results(n_samples=2000, n_warmup=1000, chains=4, random_seed=42, alpha_prior=1.0, beta_prior=0.1):
     """Load MCMC results or run MCMC if not available"""
@@ -153,7 +140,7 @@ def main():
             print(f"  Running with decay beta = {decay_beta}")
             
             # Run SVGD
-            theta, kl_list, ksd_list, eig_list, kl_kde, kl_mmd = runexp_BLR_decay(
+            theta, kl_list, ksd_list, eig_list, kl_kde_list, kl_mmd_list, kl_kde, kl_mmd = runexp_BLR_decay(
                 model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter=n_iter, step_size=stepsize, 
                 decay_factor=decay_factor, beta=decay_beta, c=c, mode=mode
             )
@@ -164,6 +151,8 @@ def main():
                 'kl_list': kl_list,
                 'ksd_list': ksd_list,
                 'eig_list': eig_list,
+                'kl_kde_list': kl_kde_list,  # Add iteration-by-iteration KDE-KL
+                'kl_mmd_list': kl_mmd_list,  # Add iteration-by-iteration MMD
                 'kl_kde': kl_kde,
                 'kl_mmd': kl_mmd,
                 'n_particles': n_particles,
@@ -191,10 +180,12 @@ def main():
                 print(f"    Final KL divergence (Gaussian): {final_kl:.6f}")
             
             if kl_kde is not None:
-                print(f"    Final KL divergence (KDE): {kl_kde:.6f}")
+                kl_kde_val = kl_kde.item() if hasattr(kl_kde, 'item') else kl_kde
+                print(f"    Final KL divergence (KDE): {kl_kde_val:.6f}")
             
             if kl_mmd is not None:
-                print(f"    Final MMD divergence: {kl_mmd:.6f}")
+                kl_mmd_val = kl_mmd.item() if hasattr(kl_mmd, 'item') else kl_mmd
+                print(f"    Final MMD divergence: {kl_mmd_val:.6f}")
             
             if ksd_list is not None and len(ksd_list) > 0:
                 final_ksd = ksd_list[-1] if ksd_list[-1] is not None else float('inf')
