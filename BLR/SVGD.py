@@ -124,26 +124,20 @@ class SVGD():
                 kl_list[iter] = self.kl_divergence(theta, true_mu, true_A)
                 ksd_list[iter] = self.ksd_distance(theta, lnprob, mode)
                 
-                # Calculate KDE-KL and MMD every 100 iterations to save computation time
-                if iter % 100 == 0 or iter == n_iter - 1:
-                    try:
-                        kl_kde_list[iter] = self.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
-                    except Exception as e:
-                        if iter == 0:  # Only print warning once
-                            print(f"Warning: KDE KL calculation failed: {e}")
-                        kl_kde_list[iter] = np.nan
-                    
-                    try:
-                        kl_mmd_list[iter] = self.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
-                    except Exception as e:
-                        if iter == 0:  # Only print warning once
-                            print(f"Warning: MMD calculation failed: {e}")
-                        kl_mmd_list[iter] = np.nan
-                else:
-                    # Interpolate between calculated values
-                    if iter > 0:
-                        kl_kde_list[iter] = kl_kde_list[iter-1]
-                        kl_mmd_list[iter] = kl_mmd_list[iter-1]
+                # Calculate KDE-KL and MMD every iteration (same frequency as KL)
+                try:
+                    kl_kde_list[iter] = self.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
+                except Exception as e:
+                    if iter == 0:  # Only print warning once
+                        print(f"Warning: KDE KL calculation failed: {e}")
+                    kl_kde_list[iter] = np.nan
+                
+                try:
+                    kl_mmd_list[iter] = self.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
+                except Exception as e:
+                    if iter == 0:  # Only print warning once
+                        print(f"Warning: MMD calculation failed: {e}")
+                    kl_mmd_list[iter] = np.nan
                 
                 if iter+1 == 1 or (iter+1) == (n_iter/2) or (iter+1) / n_iter == 1:
                     # Add numerical stability for eigenvalue computation
