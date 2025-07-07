@@ -11,12 +11,12 @@ from model import MVN
 import warnings
 warnings.filterwarnings('ignore')
 
-def runexp_Gaussian(mu, sig, init_mu, init_sig, n_iter, decay_factor=0.1, beta=1, c=0.1, mode='rbf', n_particles=10, step_size=1e-2, cons=1., seed=10, adagrad=True, lr_decay=False):
+def runexp_Gaussian(mu, sig, init_mu, init_sig, n_iter, decay_factor=0.1, beta=1, mode='rbf', n_particles=10, step_size=1e-2, cons=1., seed=10, adagrad=False, lr_decay=True):
     np.random.seed(seed)
     
     model = MVN(mu, sig)
     x0 = np.random.multivariate_normal(mean=init_mu, cov=init_sig, size=n_particles)
-    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, decay_factor=decay_factor, beta=beta, c=c, mode=mode, adagrad=adagrad, lr_decay=lr_decay, verbose=True, true_mu=mu, true_A=sig)
+    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, decay_factor=decay_factor, beta=beta, mode=mode, adagrad=adagrad, lr_decay=lr_decay, verbose=True, true_mu=mu, true_A=sig)
     
     return kl_list, ksd_list, eig_list
 
@@ -45,13 +45,12 @@ def main():
     mode = 'rbf' # or linear
     beta = 0. # [0., 0.5, 0.67, 1.]
     decay_factor = 1.0
-    c = 1.0
 
     ## experiments
-    kl_5, ksd_5, eig_5 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, c=c, mode=mode, n_particles=5, step_size=stepsize, adagrad=False, lr_decay=True)
-    kl_10, ksd_10, eig_10 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, c=c, mode=mode, n_particles=10, step_size=stepsize, adagrad=False, lr_decay=True)
-    kl_100, ksd_100, eig_100 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, c=c, mode=mode, n_particles=100, step_size=stepsize, adagrad=False, lr_decay=True)
-    kl_1000, ksd_1000, eig_1000 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, c=c, mode=mode, n_particles=1000, step_size=stepsize, adagrad=False, lr_decay=True)
+    kl_5, ksd_5, eig_5 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=5, step_size=stepsize, adagrad=False, lr_decay=True)
+    kl_10, ksd_10, eig_10 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=10, step_size=stepsize, adagrad=False, lr_decay=True)
+    kl_100, ksd_100, eig_100 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=100, step_size=stepsize, adagrad=False, lr_decay=True)
+    kl_1000, ksd_1000, eig_1000 = runexp_Gaussian(mu, A, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=1000, step_size=stepsize, adagrad=False, lr_decay=True)
 
     ## save
     for i, kls in zip([5,10,100,1000], [kl_5, kl_10, kl_100, kl_1000]):

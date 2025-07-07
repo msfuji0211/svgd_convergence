@@ -40,7 +40,7 @@ class SVGD():
         
         return (Kxy, dxkxy)
  
-    def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, c=0.1, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None, p=1/3):
+    def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None, p=1/3):
         # Check input
         if x0 is None or lnprob is None:
             raise ValueError('x0 or lnprob cannot be None!')
@@ -59,7 +59,7 @@ class SVGD():
         # adagrad with momentum
         fudge_factor = 1e-6
         historical_grad = 0
-        c = 0
+        eig_count = 0  # Counter for eigenvalue computation
         for iter in tqdm(range(n_iter)):
             if debug and (iter+1) % 1000 == 0:
                 print('iter ' + str(iter+1))
@@ -85,15 +85,17 @@ class SVGD():
                     theta = theta + stepsize * grad_theta
                 else:
                     if lr_decay:
-                        stepsize = (1/(1+(decay_factor*iter**beta)))*c
-                    theta = theta + stepsize * grad_theta
+                        current_stepsize = (1/(1+(decay_factor*iter**beta)))*stepsize
+                    else:
+                        current_stepsize = stepsize
+                    theta = theta + current_stepsize * grad_theta
             
             if verbose == True:
                 kl_list[iter] = self.kl_divergence(theta, pos_sample, p)
                 ksd_list[iter] = self.ksd_distance(theta, lnprob, mode)
                 if iter+1 == 1 or (iter+1) == (n_iter/2) or (iter+1) / n_iter == 1:
-                    eig_list[c] = np.linalg.eigvals(kxy)
-                    c += 1
+                    eig_list[eig_count] = np.linalg.eigvals(kxy)
+                    eig_count += 1
         
         return theta, mse_list, kl_list, ksd_list, fisher_list, np.sort(eig_list,axis=1)[:,::-1]
     

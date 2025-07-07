@@ -19,13 +19,13 @@ import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
-def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter, decay_factor=0.1, beta=1, c=0.1, mode='rbf', step_size=1e-2, cons=1., seed=10, adagrad=True, lr_decay=False):
+def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter, decay_factor=0.1, beta=1, mode='rbf', step_size=1e-2, cons=1., seed=10, adagrad=False, lr_decay=True):
     np.random.seed(seed)
     
     # Use MCMC-estimated true parameters
     theta, mse_list, kl_list, ksd_list, fisher_list, eig_list, kl_kde_list, kl_mmd_list = SVGD().update(
         x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, 
-        decay_factor=decay_factor, beta=beta, c=c, mode=mode, adagrad=adagrad, 
+        decay_factor=decay_factor, beta=beta, mode=mode, adagrad=adagrad, 
         lr_decay=lr_decay, verbose=True, true_mu=true_mu, true_A=true_A, mcmc_samples=mcmc_samples
     )
     
@@ -117,13 +117,12 @@ def main():
     mode = 'rbf'  # or linear
     beta = [0., 0.5, 0.67, 1.]
     decay_factor = 1.0
-    c = 1.0
 
     print(f"Running decay experiments with {n_iter} iterations...")
     
     # Run experiments with different numbers of particles
     n_particles_list = [5, 10, 20, 50]
-    
+
     for n_particles in n_particles_list:
         print(f"\nRunning experiment with {n_particles} particles...")
         
@@ -142,7 +141,7 @@ def main():
             # Run SVGD
             theta, kl_list, ksd_list, eig_list, kl_kde_list, kl_mmd_list, kl_kde, kl_mmd = runexp_BLR_decay(
                 model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter=n_iter, step_size=stepsize, 
-                decay_factor=decay_factor, beta=decay_beta, c=c, mode=mode
+                decay_factor=decay_factor, beta=decay_beta, mode=mode
             )
             
             # Save results
