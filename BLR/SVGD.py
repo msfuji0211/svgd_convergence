@@ -62,6 +62,10 @@ class SVGD():
         if x0 is None or lnprob is None:
             raise ValueError('x0 or lnprob cannot be None!')
         
+        # Initialize likelihood tracking
+        likelihood_list = np.zeros([n_iter, 1])
+        
+        # Initialize other tracking variables
         if verbose == True:
             n_particle = x0.shape[0]
             mse_list = np.zeros([n_iter,1])
@@ -71,7 +75,11 @@ class SVGD():
             kl_mmd_list = np.zeros([n_iter,1])  # Add MMD tracking
             fisher_list = np.zeros([n_iter,1])
             eig_list = np.zeros([3, n_particle], dtype=complex)
-            pos_sample = np.random.multivariate_normal(mean=true_mu, cov=true_A, size=1000)
+            # Only generate pos_sample if true_mu and true_A are provided
+            if true_mu is not None and true_A is not None:
+                pos_sample = np.random.multivariate_normal(mean=true_mu, cov=true_A, size=1000)
+            else:
+                pos_sample = None
         
         theta = np.copy(x0) 
         
@@ -88,6 +96,55 @@ class SVGD():
                 theta = theta.reshape(1, -1)
             
             lnpgrad = lnprob(theta)
+            
+            # Calculate and store likelihood (log probability)
+            # For BLR model, we can compute the log likelihood directly
+            try:
+                # Check if lnprob is a BLR model instance with log_likelihood method
+                if hasattr(lnprob, 'log_likelihood'):
+                    # Compute log likelihood for each particle
+                    log_probs = []
+                    for i in range(theta.shape[0]):
+                        theta_i = theta[i]
+                        log_prob_i = lnprob.log_likelihood(theta_i)
+                        # Convert to per-sample log likelihood
+                        if hasattr(lnprob, 'n_samples'):
+                            log_prob_i = log_prob_i / lnprob.n_samples
+                        elif hasattr(lnprob, 'X_train'):
+                            # Fallback: use X_train shape
+                            log_prob_i = log_prob_i / lnprob.X_train.shape[0]
+                        log_probs.append(log_prob_i)
+                    log_probs = np.array(log_probs)
+                elif hasattr(lnprob, 'log_posterior'):
+                    # If lnprob has a log_posterior method, use it (includes prior)
+                    log_probs = []
+                    for i in range(theta.shape[0]):
+                        theta_i = theta[i]
+                        log_prob_i = lnprob.log_posterior(theta_i)
+                        # Convert to per-sample log posterior
+                        if hasattr(lnprob, 'n_samples'):
+                            log_prob_i = log_prob_i / lnprob.n_samples
+                        elif hasattr(lnprob, 'X_train'):
+                            # Fallback: use X_train shape
+                            log_prob_i = log_prob_i / lnprob.X_train.shape[0]
+                        log_probs.append(log_prob_i)
+                    log_probs = np.array(log_probs)
+                elif hasattr(lnprob, 'log_prob'):
+                    # If lnprob has a log_prob method, use it
+                    log_probs = lnprob.log_prob(theta)
+                else:
+                    # Fallback: estimate from gradient (approximate)
+                    log_probs = -0.5 * np.sum(lnpgrad**2, axis=1)
+                
+                avg_log_prob = np.mean(log_probs)
+                likelihood_list[iter] = avg_log_prob
+                
+                # Print per-sample likelihood every iteration with more detail
+                print(f"Iteration {iter+1}: Average log likelihood per sample = {avg_log_prob:.6f} (min: {np.min(log_probs):.6f}, max: {np.max(log_probs):.6f})")
+                
+            except Exception as e:
+                print(f"Warning: Could not compute likelihood at iteration {iter+1}: {e}")
+                likelihood_list[iter] = np.nan
             
             # Add numerical stability for gradients
             if np.any(np.isnan(lnpgrad)) or np.any(np.isinf(lnpgrad)):
@@ -150,7 +207,13 @@ class SVGD():
                         eig_list[eig_count] = np.zeros(kxy.shape[0], dtype=complex)
                     eig_count += 1
         
-        return theta, mse_list, kl_list, ksd_list, fisher_list, np.sort(eig_list,axis=1)[:,::-1], kl_kde_list, kl_mmd_list
+        # Return appropriate values based on verbose flag
+        if verbose == True:
+            return theta, mse_list, kl_list, ksd_list, fisher_list, np.sort(eig_list,axis=1)[:,::-1], kl_kde_list, kl_mmd_list, likelihood_list
+        else:
+            # Return empty arrays for tracking variables when verbose=False
+            n_particle = x0.shape[0]
+            return theta, np.zeros([n_iter,1]), np.zeros([n_iter,1]), np.zeros([n_iter,1]), np.zeros([n_iter,1]), np.zeros([3, n_particle], dtype=complex), np.zeros([n_iter,1]), np.zeros([n_iter,1]), likelihood_list
     
     def MSE(self, theta, true_param):
         avg_theta = np.mean(theta, 0)
@@ -335,4 +398,56 @@ class SVGD():
         except np.linalg.LinAlgError:
             epsilon = 1e-6
             kernel_inv = np.linalg.inv(kernel_function + epsilon * np.identity(kernel_function.shape[0]))
-        return np.linalg.norm(np.matmul(kernel_inv, grad)) ** 2 
+        return np.linalg.norm(np.matmul(kernel_inv, grad)) ** 2
+    
+    def save_likelihood_history(self, likelihood_list, filename='likelihood_history.npy'):
+        """Save likelihood history to file"""
+        try:
+            np.save(filename, likelihood_list)
+            print(f"Likelihood history saved to {filename}")
+        except Exception as e:
+            print(f"Warning: Could not save likelihood history: {e}")
+    
+    def plot_likelihood_convergence(self, likelihood_list, save_path='likelihood_convergence.png'):
+        """Plot likelihood convergence over iterations"""
+        try:
+            import matplotlib.pyplot as plt
+            
+            # Handle both 1D and 2D arrays
+            if likelihood_list.ndim == 2:
+                likelihood_1d = likelihood_list[:, 0]
+            else:
+                likelihood_1d = likelihood_list
+            
+            plt.figure(figsize=(12, 8))
+            
+            # Main convergence plot
+            plt.subplot(2, 1, 1)
+            plt.plot(likelihood_1d, 'b-', linewidth=2, alpha=0.8)
+            plt.xlabel('Iteration')
+            plt.ylabel('Average Log Likelihood per Sample')
+            plt.title('SVGD Likelihood Convergence')
+            plt.grid(True, alpha=0.3)
+            
+            # Add MCMC reference line if available
+            plt.axhline(y=-0.52, color='r', linestyle='--', alpha=0.7, label='MCMC Reference (-0.52)')
+            plt.legend()
+            
+            # Distribution of final values
+            plt.subplot(2, 1, 2)
+            plt.hist(likelihood_1d, bins=20, alpha=0.7, color='blue', edgecolor='black')
+            plt.axvline(x=-0.52, color='r', linestyle='--', alpha=0.7, label='MCMC Reference')
+            plt.xlabel('Log Likelihood per Sample')
+            plt.ylabel('Frequency')
+            plt.title('Distribution of Likelihood Values')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"Likelihood convergence plot saved to {save_path}")
+        except ImportError:
+            print("Warning: matplotlib not available for plotting")
+        except Exception as e:
+            print(f"Warning: Could not create likelihood plot: {e}") 

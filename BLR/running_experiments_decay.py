@@ -23,7 +23,7 @@ def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter,
     np.random.seed(seed)
     
     # Use MCMC-estimated true parameters
-    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list, kl_kde_list, kl_mmd_list = SVGD().update(
+    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list, kl_kde_list, kl_mmd_list, likelihood_list = SVGD().update(
         x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, 
         decay_factor=decay_factor, beta=beta, mode=mode, adagrad=adagrad, 
         lr_decay=lr_decay, verbose=True, true_mu=true_mu, true_A=true_A, mcmc_samples=mcmc_samples
@@ -33,7 +33,10 @@ def runexp_BLR_decay(model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter,
     kl_kde = kl_kde_list[-1] if not np.isnan(kl_kde_list[-1]) else None
     kl_mmd = kl_mmd_list[-1] if not np.isnan(kl_mmd_list[-1]) else None
     
-    return theta, kl_list, ksd_list, eig_list, kl_kde_list, kl_mmd_list, kl_kde, kl_mmd
+    # Calculate NLL (Negative Log Likelihood) from likelihood_list
+    nll_list = -likelihood_list  # Convert log likelihood to negative log likelihood
+    
+    return theta, ksd_list, eig_list, kl_kde_list, kl_mmd_list, nll_list, kl_kde, kl_mmd
 
 def load_mcmc_results(n_samples=2000, n_warmup=1000, chains=4, random_seed=42, alpha_prior=1.0, beta_prior=0.1):
     """Load MCMC results or run MCMC if not available"""
@@ -71,7 +74,7 @@ def main():
                        help='Force rerun MCMC')
     parser.add_argument('--alpha_prior', type=float, default=1.0,
                        help='Prior shape for global precision')
-    parser.add_argument('--beta_prior', type=float, default=0.1,
+    parser.add_argument('--beta_prior', type=float, default=0.01,
                        help='Prior rate for global precision')
     args = parser.parse_args()
     
@@ -128,6 +131,9 @@ def main():
         
         # Initialize particles
         x0 = np.random.multivariate_normal(mean=init_mu, cov=init_sig, size=n_particles)
+        # Set reasonable initial values for log_tau (log precision parameter)
+        x0[:, -1] = np.log(0.1) + 0.1 * np.random.randn(n_particles)  # log_tau ~ log(0.1) + noise
+        
         print(f"  Particle initialization:")
         print(f"    x0 shape: {x0.shape}")
         print(f"    init_mu shape: {init_mu.shape}")
@@ -139,7 +145,7 @@ def main():
             print(f"  Running with decay beta = {decay_beta}")
             
             # Run SVGD
-            theta, kl_list, ksd_list, eig_list, kl_kde_list, kl_mmd_list, kl_kde, kl_mmd = runexp_BLR_decay(
+            theta, ksd_list, eig_list, kl_kde_list, kl_mmd_list, nll_list, kl_kde, kl_mmd = runexp_BLR_decay(
                 model, true_mu, true_A, mcmc_samples, x0, init_sig, n_iter=n_iter, step_size=stepsize, 
                 decay_factor=decay_factor, beta=decay_beta, mode=mode
             )
@@ -147,11 +153,11 @@ def main():
             # Save results
             results = {
                 'theta': theta,
-                'kl_list': kl_list,
                 'ksd_list': ksd_list,
                 'eig_list': eig_list,
                 'kl_kde_list': kl_kde_list,  # Add iteration-by-iteration KDE-KL
                 'kl_mmd_list': kl_mmd_list,  # Add iteration-by-iteration MMD
+                'nll_list': nll_list,  # Add iteration-by-iteration NLL
                 'kl_kde': kl_kde,
                 'kl_mmd': kl_mmd,
                 'n_particles': n_particles,
@@ -172,11 +178,9 @@ def main():
             print(f"    Results saved to {filename}")
             
             # Print final metrics
-            if kl_list is not None and len(kl_list) > 0:
-                final_kl = kl_list[-1] if kl_list[-1] is not None else float('inf')
-                if isinstance(final_kl, np.ndarray):
-                    final_kl = final_kl.item()
-                print(f"    Final KL divergence (Gaussian): {final_kl:.6f}")
+            if nll_list is not None and len(nll_list) > 0:
+                final_nll = nll_list[-1, 0] if nll_list.ndim == 2 else nll_list[-1]
+                print(f"    Final NLL: {final_nll:.6f}")
             
             if kl_kde is not None:
                 kl_kde_val = kl_kde.item() if hasattr(kl_kde, 'item') else kl_kde

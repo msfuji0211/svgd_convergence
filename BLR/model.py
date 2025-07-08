@@ -10,7 +10,7 @@ warnings.filterwarnings('ignore')
 
 class BLR:
     def __init__(self, X_train=None, y_train=None, X_test=None, y_test=None, 
-                 alpha_prior=1.0, beta_prior=0.1):
+                 alpha_prior=1.0, beta_prior=0.01):
         """
         Initialize Hierarchical Bayesian Logistic Regression for Binary Classification
         
@@ -48,22 +48,25 @@ class BLR:
     
     def log_prior(self, theta):
         """Compute log prior probability for hierarchical model"""
-        # theta = [beta_1, ..., beta_D, tau]
+        # theta = [beta_1, ..., beta_D, log_tau]
         beta = theta[:-1]  # regression coefficients
-        tau = theta[-1]    # global precision parameter
+        log_tau = theta[-1]    # log of global precision parameter
+        tau = np.exp(log_tau)  # convert back to tau
         
         # Prior for beta: N(0, 1/sqrt(tau))
         log_prior_beta = -0.5 * np.sqrt(tau) * np.sum(beta**2)
         
-        # Prior for tau: Gamma(alpha_prior, beta_prior)
-        log_prior_tau = (self.alpha_prior - 1) * np.log(tau) - self.beta_prior * tau
+        # Prior for log_tau: transformed from Gamma(alpha_prior, beta_prior)
+        # Using change of variables: p(log_tau) = p(tau) * |d tau / d log_tau|
+        log_prior_log_tau = (self.alpha_prior - 1) * log_tau - self.beta_prior * tau + log_tau
         
-        return log_prior_beta + log_prior_tau
+        return log_prior_beta + log_prior_log_tau
     
     def log_likelihood(self, theta):
         """Compute log likelihood for binary classification"""
         beta = theta[:-1]  # regression coefficients
-        tau = theta[-1]    # global precision parameter
+        log_tau = theta[-1]    # log of global precision parameter
+        # Note: tau is not used in likelihood for logistic regression
         
         # Compute logits
         logits = self.X_train @ beta
@@ -100,7 +103,8 @@ class BLR:
         for i in range(n_particles):
             theta_i = theta[i]
             beta = theta_i[:-1]  # regression coefficients
-            tau = theta_i[-1]    # global precision parameter
+            log_tau = theta_i[-1]    # log of global precision parameter
+            tau = np.exp(log_tau)  # convert back to tau
             
             # Add numerical stability for tau
             tau = np.clip(tau, 1e-6, 1e6)
@@ -116,25 +120,27 @@ class BLR:
             # Gradient of log prior w.r.t. beta
             grad_beta_prior = -np.sqrt(tau) * beta
             
-            # Gradient of log likelihood w.r.t. tau (no contribution from likelihood)
-            grad_tau_likelihood = 0.0
+            # Gradient of log likelihood w.r.t. log_tau (no contribution from likelihood)
+            grad_log_tau_likelihood = 0.0
             
-            # Gradient of log prior w.r.t. tau
+            # Gradient of log prior w.r.t. log_tau
+            # Using chain rule: d/d(log_tau) = d/d(tau) * d(tau)/d(log_tau) = d/d(tau) * tau
             grad_tau_prior = (self.alpha_prior - 1) / tau - self.beta_prior - 0.25 * np.sum(beta**2) / np.sqrt(tau)
+            grad_log_tau_prior = grad_tau_prior * tau  # chain rule
             
             # Add numerical stability for gradients
             grad_beta_prior = np.clip(grad_beta_prior, -1e6, 1e6)
-            grad_tau_prior = np.clip(grad_tau_prior, -1e6, 1e6)
+            grad_log_tau_prior = np.clip(grad_log_tau_prior, -1e6, 1e6)
             
             # Combine gradients
             grad_beta = grad_beta_likelihood + grad_beta_prior
-            grad_tau = grad_tau_likelihood + grad_tau_prior
+            grad_log_tau = grad_log_tau_likelihood + grad_log_tau_prior
             
             # Final clipping
             grad_beta = np.clip(grad_beta, -1e6, 1e6)
-            grad_tau = np.clip(grad_tau, -1e6, 1e6)
+            grad_log_tau = np.clip(grad_log_tau, -1e6, 1e6)
             
-            grad_i = np.concatenate([grad_beta, [grad_tau]])
+            grad_i = np.concatenate([grad_beta, [grad_log_tau]])
             gradients.append(grad_i)
         
         return np.array(gradients)
