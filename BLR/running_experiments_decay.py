@@ -124,8 +124,7 @@ def main():
     print(f"Running decay experiments with {n_iter} iterations...")
     
     # Run experiments with different numbers of particles
-    #n_particles_list = [5, 10, 20, 50]
-    n_particles_list = [20]
+    n_particles_list = [5, 10, 20, 50]
 
     for n_particles in n_particles_list:
         print(f"\nRunning experiment with {n_particles} particles...")
