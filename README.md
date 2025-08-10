@@ -138,18 +138,3 @@ The Bayesian Logistic Regression experiment (`BLR/`) is a new addition that test
 * **Evaluation**: Test/train accuracy and KSD convergence analysis
 
 This experiment complements the synthetic experiments (GM and MVN) by providing insights into SVGD's performance on high-dimensional, real-world data.
-
-## Maintenance
-
-### Git Ignore
-
-The `.gitignore` file is configured to automatically ignore:
-- `__pycache__/` directories and `*.pyc`, `*.pyo` files (Python cache)
-- `.Rhistory`, `.RData`, `*.Rproj` files (R cache and project files)
-- `results/` directories (experiment outputs)
-- `*.pkl`, `*.pickle` files (pickle data files)
-- `*.log` files (log files)
-- IDE and OS-specific files
-- macOS system files (`.DS_Store`)
-
-**Note**: Cache management is now handled automatically by `.gitignore`. Python and R cache files are automatically excluded from version control.
