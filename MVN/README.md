@@ -63,6 +63,10 @@ The experiment will generate:
 - seaborn
 - tqdm
 
+## Cache Management
+
+Cache files (`__pycache__/`, `.pyc`, etc.) are automatically excluded via `.gitignore`.
+
 ## Notes
 
 - The experiment provides baseline convergence analysis

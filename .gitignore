@@ -106,4 +106,10 @@ Thumbs.db
 *.pkl
 *.pickle
 results/
-*.log 
+*.log
+
+# R
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj 

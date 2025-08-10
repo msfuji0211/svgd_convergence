@@ -11,6 +11,7 @@ The goal is to approximate the posterior distribution of the hierarchical BLR mo
 - **Likelihood Tracking**: Added per-sample negative log likelihood (NLL) tracking in SVGD
 - **Evaluation Metrics**: Replaced Gaussian KL divergence with KDE-based KL divergence and MMD
 - **Analysis Tools**: Added comprehensive MCMC analysis tools for likelihood and accuracy evaluation
+- **Cache Management**: Python and R cache files are now automatically excluded via `.gitignore`
 
 ## Model Structure
 
@@ -71,6 +72,8 @@ The libsvm format dataset (`covtype.libsvm.binary.scale.bz2`) is the primary dat
 ```bash
 pip install numpy pandas scikit-learn cmdstanpy tqdm matplotlib seaborn jupyter
 ```
+
+**Note**: Cache files (`__pycache__/`, `.pyc`, `.Rhistory`, etc.) are automatically excluded via `.gitignore`.
 
 ### Installing CmdStan
 

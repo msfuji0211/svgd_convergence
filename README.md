@@ -9,7 +9,6 @@ The project is organized into directories, each representing a different experim
 ```
 .
 ├── BLR/
-│   ├── .gitignore
 │   ├── blr_model
 │   ├── blr_model.stan
 │   ├── model.py
@@ -20,21 +19,18 @@ The project is organized into directories, each representing a different experim
 │   ├── SVGD.py
 │   └── results/
 ├── GM/
-│   ├── .gitignore
 │   ├── model.py
 │   ├── plot.ipynb
 │   ├── README.md
 │   ├── running_experiments_decay.py
 │   └── SVGD.py
 ├── MVN/
-│   ├── .gitignore
 │   ├── model.py
 │   ├── plot.ipynb
 │   ├── README.md
 │   ├── running_experiments_decay.py
 │   └── SVGD.py
 ├── .gitignore
-├── clean_cache.py
 ├── LICENSE
 ├── README.md
 └── .git/...
@@ -45,8 +41,7 @@ The project is organized into directories, each representing a different experim
 * **`GM/`**: Contains code for experiments related to a Gaussian Mixture model.
 * **`MVN/`**: Contains code for experiments related to a Multivariate Normal (Gaussian) model.
 * **`BLR/`**: Contains code for experiments related to Bayesian Logistic Regression on the UCI Covertype dataset, including `blr_model` (compiled Stan model), `blr_model.stan` (Stan model definition), and a `results/` directory for experiment outputs.
-* **`clean_cache.py`**: Script to clean up Python cache files.
-* **`.gitignore`**: Git ignore rules for Python projects.
+* **`.gitignore`**: Git ignore rules for Python, R, and project-specific files.
 * **`README.md`**: This file.
 
 ### Common Files:
@@ -140,21 +135,15 @@ This experiment complements the synthetic experiments (GM and MVN) by providing 
 
 ## Maintenance
 
-### Cache Management
-
-Python automatically creates `__pycache__` directories and `.pyc` files when running scripts. To clean up these cache files:
-
-```bash
-python clean_cache.py
-```
-
-This script will remove all `__pycache__` directories and compiled Python files from the project.
-
 ### Git Ignore
 
 The `.gitignore` file is configured to automatically ignore:
-- `__pycache__/` directories
-- `*.pyc`, `*.pyo` files
+- `__pycache__/` directories and `*.pyc`, `*.pyo` files (Python cache)
+- `.Rhistory`, `.RData`, `*.Rproj` files (R cache and project files)
 - `results/` directories (experiment outputs)
-- `*.npy`, `*.npz` files (NumPy data files)
+- `*.pkl`, `*.pickle` files (pickle data files)
+- `*.log` files (log files)
 - IDE and OS-specific files
+- macOS system files (`.DS_Store`)
+
+**Note**: Cache management is now handled automatically by `.gitignore`. Python and R cache files are automatically excluded from version control.
