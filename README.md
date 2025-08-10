@@ -1,11 +1,5 @@
 # SVGD Convergence Analysis
 
-This repository contains experimental code used in the paper **[On the Convergence of SVGD in KL divergence via Approximate gradient flow](https://openreview.net/forum?id=AG1zXt5aoA)** which has been accepted for publication in TMLR (Transactions on Machine Learning Research).
-
-The paper proposes a novel analytical approach called (ε,δ)-approximate gradient flow and shows the sub-linear convergence of SVGD in Kullback--Leibler divergence under the discrete time and infinite particle settings. This repository contains the experimental code used to validate these theoretical findings.
-
-The experiments investigate SVGD's behavior on different probabilistic models, particularly focusing on the impact of various step-size decay strategies.
-
 ## Project Structure
 
 The project is organized into directories, each representing a different experimental setup or target distribution:
