@@ -16,66 +16,145 @@ class SVGD():
     
     def svgd_kernel(self, theta, h = -1, cons=1):
         """
-        RBF kernel for parameters.
+        Compute RBF kernel matrix and its gradient for SVGD.
+        
+        Parameters:
+        -----------
+        theta: array-like, shape (n_particles, n_params)
+            Current particle positions
+        h: float, optional
+            Bandwidth parameter. If h < 0, median trick is used.
+        cons: float, optional
+            Constant multiplier for the kernel
+            
+        Returns:
+        --------
+        Kxy: array-like, shape (n_particles, n_particles)
+            RBF kernel matrix
+        dxkxy: array-like, shape (n_particles, n_particles, n_params)
+            Gradient of the kernel matrix with respect to theta
         """
-        # Add numerical stability checks
+        # Numerical stability: handle NaN/inf values in particle positions
         if np.any(np.isnan(theta)) or np.any(np.isinf(theta)):
             print("Warning: theta contains NaN or inf values")
             theta = np.nan_to_num(theta, nan=0.0, posinf=1e6, neginf=-1e6)
         
+        # Compute pairwise squared distances between all particles
         sq_dist = pdist(theta)
         pairwise_dists = squareform(sq_dist)**2
         
-        # Add numerical stability
+        # Clip distances to prevent numerical overflow
         pairwise_dists = np.clip(pairwise_dists, 0, 1e10)
         
-        if h < 0: # if h < 0, using median trick
+        # Automatic bandwidth selection using median trick
+        if h < 0:  # median trick for bandwidth selection
             h = np.median(pairwise_dists)  
             h = np.sqrt(0.5 * h / np.log(theta.shape[0]+1))
-            h = np.clip(h, 1e-6, 1e6)  # Clip h to reasonable range
+            h = np.clip(h, 1e-6, 1e6)
 
-        # compute the rbf kernel
+        # Compute RBF kernel matrix
         Kxy = cons * np.exp( -pairwise_dists / h**2 / 2)
         
-        # Add numerical stability
+        # Ensure kernel values are within reasonable bounds
         Kxy = np.clip(Kxy, 1e-10, 1e10)
 
+        # Compute gradient of kernel matrix with respect to theta
+        # This implements the SVGD gradient formula: ∇_x K(x,y)
         dxkxy = -np.matmul(Kxy, theta)
         sumkxy = np.sum(Kxy, axis=1)
         for i in range(theta.shape[1]):
             dxkxy[:, i] = dxkxy[:,i] + np.multiply(theta[:,i],sumkxy)
         dxkxy = dxkxy / (h**2)
         
-        # Add numerical stability
+        # Ensure gradient values are within reasonable bounds
         dxkxy = np.clip(dxkxy, -1e6, 1e6)
         
         return (Kxy, dxkxy)
     
     def svgd_linear(self, theta, cons=1):
+        """
+        Compute linear kernel matrix and its gradient for SVGD.
+        
+        Parameters:
+        -----------
+        theta: array-like, shape (n_particles, n_params)
+            Current particle positions
+        cons: float, optional
+            Constant added to the kernel
+            
+        Returns:
+        --------
+        Kxy: array-like, shape (n_particles, n_particles)
+            Linear kernel matrix
+        dxkxy: array-like, shape (n_particles, n_params)
+            Gradient of the kernel matrix
+        """
         Kxy = linear(theta, theta) + cons
         dxkxy = theta
         
         return (Kxy, dxkxy)
  
     def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None, mcmc_samples=None):
-        # Check input
+        """
+        Update SVGD particles using Stein variational gradient descent.
+        
+        Parameters:
+        -----------
+        x0: array-like, shape (n_particles, n_params)
+            Initial particle positions
+        lnprob: callable
+            Function that returns log probability gradients
+        n_iter: int, optional
+            Number of iterations
+        stepsize: float, optional
+            Learning rate
+        bandwidth: float, optional
+            Kernel bandwidth. If < 0, median trick is used
+        alpha: float, optional
+            Momentum parameter for AdaGrad
+        cons: float, optional
+            Kernel constant
+        decay_factor: float, optional
+            Learning rate decay factor
+        beta: float, optional
+            Learning rate decay exponent
+        mode: str, optional
+            Kernel type ('rbf' or 'linear')
+        adagrad: bool, optional
+            Whether to use AdaGrad optimization
+        lr_decay: bool, optional
+            Whether to use learning rate decay
+        debug: bool, optional
+            Whether to print debug information
+        verbose: bool, optional
+            Whether to compute and return tracking metrics
+        true_mu: array-like, optional
+            True mean for KL divergence calculation
+        true_A: array-like, optional
+            True precision matrix for KL divergence calculation
+        mcmc_samples: array-like, optional
+            MCMC samples for KDE/MMD-based divergence estimation
+            
+        Returns:
+        --------
+        theta: array-like
+            Final particle positions
+        Various tracking metrics if verbose=True
+        """
         if x0 is None or lnprob is None:
             raise ValueError('x0 or lnprob cannot be None!')
         
-        # Initialize likelihood tracking
         likelihood_list = np.zeros([n_iter, 1])
         
-        # Initialize other tracking variables
         if verbose == True:
             n_particle = x0.shape[0]
             mse_list = np.zeros([n_iter,1])
             kl_list = np.zeros([n_iter,1])
             ksd_list = np.zeros([n_iter,1])
-            kl_kde_list = np.zeros([n_iter,1])  # Add KDE-KL tracking
-            kl_mmd_list = np.zeros([n_iter,1])  # Add MMD tracking
+            kl_kde_list = np.zeros([n_iter,1])
+            kl_mmd_list = np.zeros([n_iter,1])
             fisher_list = np.zeros([n_iter,1])
             eig_list = np.zeros([3, n_particle], dtype=complex)
-            # Only generate pos_sample if true_mu and true_A are provided
             if true_mu is not None and true_A is not None:
                 pos_sample = np.random.multivariate_normal(mean=true_mu, cov=true_A, size=1000)
             else:
@@ -83,10 +162,9 @@ class SVGD():
         
         theta = np.copy(x0) 
         
-        # adagrad with momentum
         fudge_factor = 1e-6
         historical_grad = 0
-        eig_count = 0  # Counter for eigenvalue computation
+        eig_count = 0
         for iter in tqdm(range(n_iter)):
             if debug and (iter+1) % 1000 == 0:
                 print('iter ' + str(iter+1))
@@ -97,71 +175,55 @@ class SVGD():
             
             lnpgrad = lnprob(theta)
             
-            # Calculate and store likelihood (log probability)
-            # For BLR model, we can compute the log likelihood directly
             try:
-                # Check if lnprob is a BLR model instance with log_likelihood method
                 if hasattr(lnprob, 'log_likelihood'):
-                    # Compute log likelihood for each particle
                     log_probs = []
                     for i in range(theta.shape[0]):
                         theta_i = theta[i]
                         log_prob_i = lnprob.log_likelihood(theta_i)
-                        # Convert to per-sample log likelihood
                         if hasattr(lnprob, 'n_samples'):
                             log_prob_i = log_prob_i / lnprob.n_samples
                         elif hasattr(lnprob, 'X_train'):
-                            # Fallback: use X_train shape
                             log_prob_i = log_prob_i / lnprob.X_train.shape[0]
                         log_probs.append(log_prob_i)
                     log_probs = np.array(log_probs)
                 elif hasattr(lnprob, 'log_posterior'):
-                    # If lnprob has a log_posterior method, use it (includes prior)
                     log_probs = []
                     for i in range(theta.shape[0]):
                         theta_i = theta[i]
                         log_prob_i = lnprob.log_posterior(theta_i)
-                        # Convert to per-sample log posterior
                         if hasattr(lnprob, 'n_samples'):
                             log_prob_i = log_prob_i / lnprob.n_samples
                         elif hasattr(lnprob, 'X_train'):
-                            # Fallback: use X_train shape
                             log_prob_i = log_prob_i / lnprob.X_train.shape[0]
                         log_probs.append(log_prob_i)
                     log_probs = np.array(log_probs)
                 elif hasattr(lnprob, 'log_prob'):
-                    # If lnprob has a log_prob method, use it
                     log_probs = lnprob.log_prob(theta)
                 else:
-                    # Fallback: estimate from gradient (approximate)
                     log_probs = -0.5 * np.sum(lnpgrad**2, axis=1)
                 
                 avg_log_prob = np.mean(log_probs)
                 likelihood_list[iter] = avg_log_prob
                 
-                # Print per-sample likelihood every iteration with more detail
                 print(f"Iteration {iter+1}: Average log likelihood per sample = {avg_log_prob:.6f} (min: {np.min(log_probs):.6f}, max: {np.max(log_probs):.6f})")
                 
             except Exception as e:
                 print(f"Warning: Could not compute likelihood at iteration {iter+1}: {e}")
                 likelihood_list[iter] = np.nan
             
-            # Add numerical stability for gradients
             if np.any(np.isnan(lnpgrad)) or np.any(np.isinf(lnpgrad)):
                 print(f"Warning: lnpgrad contains NaN or inf values at iteration {iter+1}")
                 lnpgrad = np.nan_to_num(lnpgrad, nan=0.0, posinf=1e6, neginf=-1e6)
             
-            # calculating the kernel matrix
             if mode == 'rbf':
                 kxy, dxkxy = self.svgd_kernel(theta, h = -1, cons= cons)
             elif mode == 'linear':
                 kxy, dxkxy = self.svgd_linear(theta, cons=cons)
             grad_theta = (np.matmul(kxy, lnpgrad) + dxkxy) / theta.shape[0]
             
-            # Add numerical stability for final gradient
             grad_theta = np.clip(grad_theta, -1e6, 1e6)
             
-            # adagrad
             if adagrad:
                 if iter == 0:
                     historical_grad = historical_grad + grad_theta ** 2
@@ -183,18 +245,17 @@ class SVGD():
                 kl_list[iter] = self.kl_divergence(theta, true_mu, true_A)
                 ksd_list[iter] = self.ksd_distance(theta, lnprob, mode)
                 
-                # Calculate KDE-KL and MMD every iteration (same frequency as KL)
                 try:
                     kl_kde_list[iter] = self.kl_divergence_kde(theta, mcmc_samples, bandwidth='silverman')
                 except Exception as e:
-                    if iter == 0:  # Only print warning once
+                    if iter == 0:
                         print(f"Warning: KDE KL calculation failed: {e}")
                     kl_kde_list[iter] = np.nan
                 
                 try:
                     kl_mmd_list[iter] = self.kl_divergence_mmd(theta, mcmc_samples, bandwidth='median')
                 except Exception as e:
-                    if iter == 0:  # Only print warning once
+                    if iter == 0:
                         print(f"Warning: MMD calculation failed: {e}")
                     kl_mmd_list[iter] = np.nan
                 
@@ -231,19 +292,15 @@ class SVGD():
         mu_theta = np.mean(theta, 0)
         cov_theta = np.cov(theta.T)
         
-        # Add small regularization to avoid singular matrix
         eps = 1e-6
         cov_theta += eps * np.eye(cov_theta.shape[0])
         
         try:
-            # true_A is precision matrix, so we need its inverse for covariance
             true_cov = np.linalg.inv(true_A)
             
-            # Compute KL divergence
             d = len(true_mu)
             mean_diff = true_mu - mu_theta
             
-            # KL divergence formula for multivariate normal
             kl = 0.5 * (
                 np.trace(np.linalg.solve(true_cov, cov_theta)) +
                 np.dot(mean_diff, np.linalg.solve(true_cov, mean_diff)) -
@@ -252,7 +309,6 @@ class SVGD():
             
             return kl
         except np.linalg.LinAlgError:
-            # Fallback: use simpler distance measure
             return np.mean((mu_theta - true_mu) ** 2)
     
     def kl_divergence_kde(self, theta, mcmc_samples, bandwidth='silverman'):
@@ -274,25 +330,17 @@ class SVGD():
             return 0.0
         
         try:
-            # Use a subset of MCMC samples for computational efficiency
-            n_mcmc = min(len(mcmc_samples), 1000)  # Limit to 1000 samples
+            n_mcmc = min(len(mcmc_samples), 1000)
             mcmc_subset = mcmc_samples[:n_mcmc]
             
-            # Fit KDE to MCMC samples (true posterior)
             kde_true = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(mcmc_subset)
-            
-            # Fit KDE to SVGD particles
             kde_svgd = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(theta)
             
-            # Compute log densities at MCMC sample locations (true distribution)
             log_density_true_at_mcmc = kde_true.score_samples(mcmc_subset)
             log_density_svgd_at_mcmc = kde_svgd.score_samples(mcmc_subset)
             
-            # KL divergence: E_p[log(p) - log(q)] where p is true, q is SVGD
-            # We compute this expectation over the true distribution (MCMC samples)
             kl = np.mean(log_density_true_at_mcmc - log_density_svgd_at_mcmc)
             
-            # Ensure non-negativity (numerical stability)
             kl = max(0.0, kl)
             
             return kl
@@ -338,14 +386,12 @@ class SVGD():
             else:
                 h = bandwidth
             
-            # Compute MMD
             Kxx = rbf(theta, theta, h).mean()
             Kxy = rbf(theta, mcmc_subset, h).mean()
             Kyy = rbf(mcmc_subset, mcmc_subset, h).mean()
             
             mmd = Kxx - 2 * Kxy + Kyy
             
-            # Ensure non-negativity
             mmd = max(0.0, mmd)
             
             return mmd
@@ -413,7 +459,6 @@ class SVGD():
         try:
             import matplotlib.pyplot as plt
             
-            # Handle both 1D and 2D arrays
             if likelihood_list.ndim == 2:
                 likelihood_1d = likelihood_list[:, 0]
             else:
@@ -421,7 +466,6 @@ class SVGD():
             
             plt.figure(figsize=(12, 8))
             
-            # Main convergence plot
             plt.subplot(2, 1, 1)
             plt.plot(likelihood_1d, 'b-', linewidth=2, alpha=0.8)
             plt.xlabel('Iteration')
@@ -429,11 +473,9 @@ class SVGD():
             plt.title('SVGD Likelihood Convergence')
             plt.grid(True, alpha=0.3)
             
-            # Add MCMC reference line if available
             plt.axhline(y=-0.52, color='r', linestyle='--', alpha=0.7, label='MCMC Reference (-0.52)')
             plt.legend()
             
-            # Distribution of final values
             plt.subplot(2, 1, 2)
             plt.hist(likelihood_1d, bins=20, alpha=0.7, color='blue', edgecolor='black')
             plt.axvline(x=-0.52, color='r', linestyle='--', alpha=0.7, label='MCMC Reference')

@@ -16,15 +16,30 @@ class SVGD():
     
     def svgd_kernel(self, theta, h = -1, cons=1):
         """
-        RBF kernel for parameters.
+        Compute RBF kernel matrix and its gradient for SVGD.
+        
+        Parameters:
+        -----------
+        theta: array-like, shape (n_particles, n_params)
+            Current particle positions
+        h: float, optional
+            Bandwidth parameter. If h < 0, median trick is used.
+        cons: float, optional
+            Constant multiplier for the kernel
+            
+        Returns:
+        --------
+        Kxy: array-like, shape (n_particles, n_particles)
+            RBF kernel matrix
+        dxkxy: array-like, shape (n_particles, n_particles, n_params)
+            Gradient of the kernel matrix with respect to theta
         """
         sq_dist = pdist(theta)
         pairwise_dists = squareform(sq_dist)**2
-        if h < 0: # if h < 0, using median trick
+        if h < 0:  # median trick for bandwidth selection
             h = np.median(pairwise_dists)  
             h = np.sqrt(0.5 * h / np.log(theta.shape[0]+1))
 
-        # compute the rbf kernel
         Kxy = cons * np.exp( -pairwise_dists / h**2 / 2)
 
         dxkxy = -np.matmul(Kxy, theta)
@@ -35,13 +50,75 @@ class SVGD():
         return (Kxy, dxkxy)
     
     def svgd_linear(self, theta, cons=1):
+        """
+        Compute linear kernel matrix and its gradient for SVGD.
+        
+        Parameters:
+        -----------
+        theta: array-like, shape (n_particles, n_params)
+            Current particle positions
+        cons: float, optional
+            Constant added to the kernel
+            
+        Returns:
+        --------
+        Kxy: array-like, shape (n_particles, n_particles)
+            Linear kernel matrix
+        dxkxy: array-like, shape (n_particles, n_params)
+            Gradient of the kernel matrix
+        """
         Kxy = linear(theta, theta) + cons
         dxkxy = theta
         
         return (Kxy, dxkxy)
  
     def update(self, x0, lnprob, n_iter = 1000, stepsize = 1e-3, bandwidth = -1, alpha = 0.9, cons = 1, decay_factor=0.01, beta=1, mode = 'rbf', adagrad=True, lr_decay=False, debug = False, verbose=False, true_mu=None, true_A=None, p=1/3):
-        # Check input
+        """
+        Update SVGD particles using Stein variational gradient descent.
+        
+        Parameters:
+        -----------
+        x0: array-like, shape (n_particles, n_params)
+            Initial particle positions
+        lnprob: callable
+            Function that returns log probability gradients
+        n_iter: int, optional
+            Number of iterations
+        stepsize: float, optional
+            Learning rate
+        bandwidth: float, optional
+            Kernel bandwidth. If < 0, median trick is used
+        alpha: float, optional
+            Momentum parameter for AdaGrad
+        cons: float, optional
+            Kernel constant
+        decay_factor: float, optional
+            Learning rate decay factor
+        beta: float, optional
+            Learning rate decay exponent
+        mode: str, optional
+            Kernel type ('rbf' or 'linear')
+        adagrad: bool, optional
+            Whether to use AdaGrad optimization
+        lr_decay: bool, optional
+            Whether to use learning rate decay
+        debug: bool, optional
+            Whether to print debug information
+        verbose: bool, optional
+            Whether to compute and return tracking metrics
+        true_mu: array-like, optional
+            True mean for KL divergence calculation
+        true_A: array-like, optional
+            True precision matrix for KL divergence calculation
+        p: float, optional
+            Mixing proportion for Gaussian mixture model
+            
+        Returns:
+        --------
+        theta: array-like
+            Final particle positions
+        Various tracking metrics if verbose=True
+        """
         if x0 is None or lnprob is None:
             raise ValueError('x0 or lnprob cannot be None!')
         
@@ -56,23 +133,20 @@ class SVGD():
         
         theta = np.copy(x0) 
         
-        # adagrad with momentum
         fudge_factor = 1e-6
         historical_grad = 0
-        eig_count = 0  # Counter for eigenvalue computation
+        eig_count = 0
         for iter in tqdm(range(n_iter)):
             if debug and (iter+1) % 1000 == 0:
                 print('iter ' + str(iter+1))
             
             lnpgrad = lnprob(theta)
-            # calculating the kernel matrix
             if mode == 'rbf':
                 kxy, dxkxy = self.svgd_kernel(theta, h = -1, cons= cons)
             elif mode == 'linear':
                 kxy, dxkxy = self.svgd_linear(theta, cons=cons)
             grad_theta = (np.matmul(kxy, lnpgrad) + dxkxy) / x0.shape[0]
             
-            # adagrad
             if adagrad:
                 if iter == 0:
                     historical_grad = historical_grad + grad_theta ** 2

@@ -12,15 +12,75 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def runexp_Gaussian(mu, sig, p, init_mu, init_sig, n_iter, decay_factor=0.1, beta=1, mode='rbf', n_particles=10, step_size=1e-2, cons=1., seed=10, adagrad=False, lr_decay=True):
+    """
+    Run SVGD experiment for Gaussian mixture model.
+    
+    Parameters:
+    -----------
+    mu: array-like
+        True mean of the target distribution
+    sig: array-like
+        True covariance matrix of the target distribution
+    p: float
+        Mixing proportion for Gaussian mixture
+    init_mu: array-like
+        Initial mean for particle initialization
+    init_sig: array-like
+        Initial covariance for particle initialization
+    n_iter: int
+        Number of SVGD iterations
+    decay_factor: float
+        Learning rate decay factor
+    beta: float
+        Learning rate decay exponent
+    mode: str
+        Kernel type ('rbf' or 'linear')
+    n_particles: int
+        Number of particles
+    step_size: float
+        Initial learning rate
+    cons: float
+        Kernel constant
+    seed: int
+        Random seed for reproducibility
+    adagrad: bool
+        Whether to use AdaGrad optimization
+    lr_decay: bool
+        Whether to use learning rate decay
+        
+    Returns:
+    --------
+    tuple: (kl_list, ksd_list, eig_list)
+        Lists of KL divergence, KSD, and eigenvalues over iterations
+    """
     np.random.seed(seed)
     
+    # Initialize model and particles
     model = MVN(mu, sig)
     x0 = np.random.multivariate_normal(mean=init_mu, cov=init_sig, size=n_particles)
-    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, decay_factor=decay_factor, beta=beta, mode=mode, adagrad=adagrad, lr_decay=lr_decay, verbose=True, true_mu=mu, true_A=sig, p=p)
+    
+    # Run SVGD optimization
+    theta, mse_list, kl_list, ksd_list, fisher_list, eig_list = SVGD().update(
+        x0, model.dlnprob, n_iter=n_iter, stepsize=step_size, cons=cons, 
+        decay_factor=decay_factor, beta=beta, mode=mode, adagrad=adagrad, 
+        lr_decay=lr_decay, verbose=True, true_mu=mu, true_A=sig, p=p
+    )
     
     return kl_list, ksd_list, eig_list
 
 def cumulative_mean(dist_list):
+    """
+    Compute cumulative mean of a list of values.
+    
+    Parameters:
+    -----------
+    dist_list: array-like
+        List of values to compute cumulative mean for
+        
+    Returns:
+    --------
+    array-like: Cumulative mean at each position
+    """
     cum_sum = np.cumsum(dist_list, 0)
     for i in range(len(cum_sum)):
         cum_sum[i] /= (i+1)
@@ -28,39 +88,54 @@ def cumulative_mean(dist_list):
 
 
 def main():
-    # path for results
+    """Main function to run Gaussian mixture SVGD experiments."""
+    
+    # Create results directory
     path = os.getcwd()
     if not os.path.exists(path+'/results/'):
         os.mkdir('results')
     results_path = path + '/results/'
     
-    A = np.eye(4)
-    mu = np.array([2,-2, -2, 2])
+    # Define target distribution parameters
+    A = np.eye(4)  # Identity covariance matrix
+    mu = np.array([2, -2, -2, 2])  # Target mean
     
-    init_sig = np.eye(4)
-    init_mu = np.array([-5,-5, -5,-5])
+    # Define initial particle distribution
+    init_sig = np.eye(4)  # Initial covariance
+    init_mu = np.array([-5, -5, -5, -5])  # Initial mean
     
-    n_iter = 10**5 ## 100000 seems better
-    stepsize = 1e-2
-    mode = 'rbf' # or linear
-    beta = 1. # [0., 0.5, 0.67, 1.]
-    decay_factor = 1.0
-    p = 1/3
+    # Experiment parameters
+    n_iter = 10**5  # Number of iterations (100000 seems better)
+    stepsize = 1e-2  # Learning rate
+    mode = 'rbf'  # Kernel type: 'rbf' or 'linear'
+    beta = 1.0  # Learning rate decay exponent [0.0, 0.5, 0.67, 1.0]
+    decay_factor = 1.0  # Learning rate decay factor
+    p = 1/3  # Mixing proportion for Gaussian mixture
     
 
-    ## experiments
+    # Run experiments with different numbers of particles
+    print("Running experiments with 5 particles...")
     kl_5, ksd_5, eig_5 = runexp_Gaussian(mu, A, p, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=5, step_size=stepsize, adagrad=False, lr_decay=True)
+    
+    print("Running experiments with 10 particles...")
     kl_10, ksd_10, eig_10 = runexp_Gaussian(mu, A, p, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=10, step_size=stepsize, adagrad=False, lr_decay=True)
+    
+    print("Running experiments with 100 particles...")
     kl_100, ksd_100, eig_100 = runexp_Gaussian(mu, A, p, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=100, step_size=stepsize, adagrad=False, lr_decay=True)
+    
+    print("Running experiments with 1000 particles...")
     kl_1000, ksd_1000, eig_1000 = runexp_Gaussian(mu, A, p, init_mu, init_sig, n_iter, decay_factor=decay_factor, beta=beta, mode=mode, n_particles=1000, step_size=stepsize, adagrad=False, lr_decay=True)
 
-    ## save
-    for i, kls in zip([5,10,100,1000], [kl_5, kl_10, kl_100, kl_1000]):
+    # Save results to files
+    print("Saving results...")
+    for i, kls in zip([5, 10, 100, 1000], [kl_5, kl_10, kl_100, kl_1000]):
         np.save(results_path+'kl_{0}_{1}_{2}'.format(mode, beta, i), kls)
-    for i, ksd in zip([5,10,100,1000], [ksd_5, ksd_10, ksd_100, ksd_1000]):
+    for i, ksd in zip([5, 10, 100, 1000], [ksd_5, ksd_10, ksd_100, ksd_1000]):
         np.save(results_path+'ksd_{0}_{1}_{2}'.format(mode, beta, i), ksd)
-    for i, eig in zip([5,10,100,1000], [eig_5, eig_10, eig_100, eig_1000]):
+    for i, eig in zip([5, 10, 100, 1000], [eig_5, eig_10, eig_100, eig_1000]):
         np.save(results_path+'eig_{0}_{1}_{2}'.format(mode, beta, i), eig)
+    
+    print("All experiments completed and results saved!")
 
 if __name__ == '__main__':
     main()
